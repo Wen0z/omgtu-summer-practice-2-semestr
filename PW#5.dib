@@ -56,14 +56,38 @@ class Message
 #!csharp
 
 using System.Collections.Concurrent;
+using System.Threading;
 
-var queue1 = new BlockingCollection<Message>(2); //очередь первого потока
-var queue2 = new BlockingCollection<Message>(2); //очередь второго потока
+var thread1Queue = new BlockingCollection<Message>(2);
+var thread2Queue = new BlockingCollection<Message>(2); 
 
-// Здесь писать решение
+var thread1 = new Thread(() => PingPong(thread1Queue, thread2Queue));
+var thread2 = new Thread(() => PingPong(thread2Queue, thread1Queue));
+
+thread1Queue.Add(new Message());
+
+thread1.Start();
+thread2.Start();
+
+thread1.Join();
+thread2.Join();
+
+void PingPong(BlockingCollection<Message> sourceQueue, BlockingCollection<Message> targetQueue)
+{
+    for (int i = 0; i < 100; i++)
+    {
+        var receivedMessage = sourceQueue.Take();
+        receivedMessage.Handle();
+
+        var newMessage = new Message();
+        targetQueue.Add(newMessage);
+    }
+}
+
+thread1Queue.TryTake(out var finalMessage);
 
 #!csharp
 
-Assert.Equal(0, queue1.Count);
-Assert.Equal(0, queue2.Count);
+Assert.Equal(0, thread1Queue.Count);
+Assert.Equal(0, thread2Queue.Count);
 Message.Check();
