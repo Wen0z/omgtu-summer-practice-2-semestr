@@ -32,35 +32,158 @@
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System;
+using System.Threading;
+
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        if(!Double.IsNormal(a) || !Double.IsNormal(b) || !Double.IsNormal(step) || !Double.IsNormal(threadsNumber))
+        {
+            throw new Exception("Invalid input");
+        }
+
+        Barrier barrier = new Barrier(threadsNumber);
+        int numberOfSteps = Convert.ToInt32((b - a) / step);
+        double sum = 0;
+        
+        Parallel.For(0, threadsNumber, (i) =>
+        {
+            double subSum = 0;
+            for (int k = i; k < numberOfSteps - 1; k += threadsNumber)
+            {
+                subSum += function(a + k * step) + function(a + (k + 1) * step);
+            }
+
+            subSum *= step / 2;
+            Interlocked.Exchange(ref sum, sum + subSum);
+            barrier.SignalAndWait();
+        });
+
+        return sum;
     }
 }
 
 #!csharp
 
 #r "nuget: xunit, 2.8.1"
+#r "nuget:ScottPlot, 5.0.35"
 
 using Xunit;
+using Microsoft.DotNet.Interactive.Formatting;
+using System.Diagnostics;
+using System.Collections.Generic;
+using System.Linq;
 
-var X = (double x) => x;
-var SIN = (double x) => Math.Sin(x);
+Func<double, double> X = (x) => x;
+Func<double, double> SIN = (x) => Math.Sin(x);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
+Stopwatch stopwatch = new Stopwatch();
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+double threadTime;
+double minThreadTime = double.MaxValue;
+int minThreadNumber = 0;
+Dictionary<int, double> results = new Dictionary<int, double>();
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 5, X, 1e-6, 8), 1e-5);
+Console.WriteLine("Результаты промежуточных измерений:");
+
+for (int threadNumber = 1; threadNumber <= 30; threadNumber++)
+{
+    threadTime = 0;
+    for (int test = 0; test < 300; test++)
+    {
+        stopwatch.Reset();
+        stopwatch.Start();
+
+        double result = DefiniteIntegral.Solve(-100, 100, SIN, 1e-4, threadNumber);
+        Assert.Equal(0, result, 1e-4);
+
+        stopwatch.Stop();
+        threadTime += stopwatch.ElapsedTicks;
+    }
+
+    threadTime /= 300;
+
+    if (threadTime < minThreadTime)
+    {
+        minThreadTime = threadTime;
+        minThreadNumber = threadNumber;
+    }
+
+    results.Add(threadNumber, threadTime);
+    Console.WriteLine($"Потоки: {threadNumber}\tВремя: {threadTime} тиков");
+}
+
+Console.WriteLine($"Оптимальное количество потоков: {minThreadNumber}\tМинимальное время: {minThreadTime} тиков");
+
+Formatter.Register<ScottPlot.Plot>((p, w) =>
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(1600, 1200)),
+    HtmlFormatter.MimeType);
+
+ScottPlot.Plot plt = new ScottPlot.Plot();
+var threadNumbers = results.Keys.ToArray();
+var times = results.Values.ToArray();
+plt.Add.Scatter(times, threadNumbers);
+
+plt
+
+//Код выполняется за 2 минуты 58,7 секунд (процессор Ryzen 5 6600H)
+//Оптимальное кол-во потоков - 28
+//Минимальное время - 127583.26333333334 тиков
+
+#!csharp
+
+//Код для однопоточного вычисления
+//Взято из практикума по программированию
+
+class TrapezoidalRule
+{
+    public static double Solve(Func<double, double> f, double a, double b, double dx) 
+    {
+        if(!Double.IsNormal(a) || !Double.IsNormal(b) || !Double.IsNormal(dx))
+        {
+            throw new Exception("Invalid input");
+        }
+        
+        int numberOfSteps = Convert.ToInt32((b - a)/dx);
+        double step = (b - a) / numberOfSteps;
+        double result = 0.5 * (f(a) + f(b));  
+        for(int i = 1; i < numberOfSteps; i++)
+        {
+            result += f(a + step * i);
+        }
+        result *= step;
+
+        return result;
+    }
+}
+
+#!csharp
+
+using System.Diagnostics;
+
+Func<double, double> f = (double x) => Math.Sin(x);
+
+double answer = 0;
+double onethreadTime = 0;
+
+for (int i = 0; i < 1000; i++)
+{
+    Stopwatch stopwatch = new Stopwatch();
+    stopwatch.Start();
+
+
+    double result = TrapezoidalRule.Solve(f, -100, 100, 1e-4);
+    answer += result;
+
+    stopwatch.Stop();
+    onethreadTime += stopwatch.ElapsedTicks;
+}
+
+onethreadTime /= 1000;
+answer /= 1000;
+
+Console.WriteLine($"Ответ: {answer}\tВремя выполнения: {onethreadTime} тиков");
+
+//Время выполнения - 429055.725 тиков
